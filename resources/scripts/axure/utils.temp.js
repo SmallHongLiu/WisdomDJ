@@ -1,7 +1,8 @@
 ﻿// ******* Deep Copy ******** //
 $axure.internal(function($ax) {
     // TODO: [ben] Ah, infinite loops cause major issues here. Tried saving objects we've already hit, but that didn't seem to work (at least at my first shot).
-    var _deepCopy = function(original, trackCopies) {
+    // TODO:  [ben] To continue from above, added a filter to filter out problem keys. Will need a better way of sorting this out eventually.
+    var _deepCopy = function (original, trackCopies, filter) {
         if(trackCopies) {
             var index = _getCopyIndex(original);
             if(index != -1) return _originalToCopy[index][1];
@@ -11,7 +12,7 @@ $axure.internal(function($ax) {
         if(!isArray && !isObject) return original;
         var copy = isArray ? [] : { };
         if(trackCopies) _originalToCopy.push([original, copy]);
-        isArray ? deepCopyArray(original, trackCopies, copy) : deepCopyObject(original, trackCopies, copy);
+        isArray ? deepCopyArray(original, trackCopies, copy, filter) : deepCopyObject(original, trackCopies, copy, filter);
         return copy;
     };
     $ax.deepCopy = _deepCopy;
@@ -25,27 +26,25 @@ $axure.internal(function($ax) {
     };
 
     $ax.eventCopy = function(eventInfo) {
-        var dragInfo = eventInfo.dragInfo;
-        delete eventInfo.dragInfo;
-        var copy = _deepCopy(eventInfo, true);
-        copy.dragInfo = dragInfo;
-        eventInfo.dragInfo = dragInfo;
-        // reset the map.
+        var copy = _deepCopy(eventInfo, true, ['dragInfo', 'elementQuery', 'obj']);
+        // reset the map. TODO: May need to reset elsewhere too, but this is the only way it's used currently
         _originalToCopy = [];
 
         return copy;
     };
 
-    var deepCopyArray = function(original, trackCopies, copy) {
+    var deepCopyArray = function(original, trackCopies, copy, filter) {
         for(var i = 0; i < original.length; i++) {
-            copy[i] = _deepCopy(original[i], trackCopies);
+            copy[i] = _deepCopy(original[i], trackCopies, filter);
         }
     };
 
-    var deepCopyObject = function(original, trackCopies, copy) {
+    var deepCopyObject = function(original, trackCopies, copy, filter) {
         for(var key in original) {
-            if(!original.hasOwnProperty(key)) continue;
-            copy[key] = _deepCopy(original[key], trackCopies);
+            if(!original.hasOwnProperty(key)) continue; // Continue if the prop was not put there like a dictionary, but just a native part of the object
+
+            if(filter && filter.indexOf[key] != -1) copy[key] = original[key]; // If that key is filtered out, skip recursion on it.
+            else copy[key] = _deepCopy(original[key], trackCopies, filter);
         }
     };
 
@@ -66,9 +65,9 @@ $axure.internal(function($ax) {
 // ******* Flow Shape Links ******** //
 $axure.internal(function($ax) {
 
-    if(!$ax.document.configuration.linkFlowsToPages && !$ax.document.configuration.linkFlowsToPagesNewWindow) return;
-
     $(window.document).ready(function() {
+        if (!$ax.document.configuration.linkFlowsToPages && !$ax.document.configuration.linkFlowsToPagesNewWindow) return;
+
         $ax(function (dObj) { return ($ax.public.fn.IsVector(dObj.type) || $ax.public.fn.IsSnapshot(dObj.type)) && dObj.referencePageUrl; }).each(function (dObj, elementId) {
 
             var elementIdQuery = $('#' + elementId);

@@ -146,7 +146,8 @@ $axure.internal(function($ax) {
         //TODO: [mas] handle required type
         if((sto.prop == 'url' || sto.prop == 'img') && sto.thisSTO.sto == 'item') return _stoHandlers.item(sto.thisSTO, scope, eventInfo, sto.prop);
         var thisObj = _evaluateSTO(sto.thisSTO, scope, eventInfo);
-        return thisObj[sto.prop];
+        var prop = thisObj[sto.prop] instanceof Function ? thisObj[sto.prop]() : thisObj[sto.prop];
+        return prop;
     };
 
     var _binOps = {};

@@ -4,146 +4,110 @@ $axure.internal(function($ax) {
 
     var _annotationManager = $ax.annotation = {};
 
-    var _updateLinkLocations = $ax.annotation.updateLinkLocations = function(textId) {
-        var diagramObject = $ax.getObjectFromElementId(textId);
-        var rotation = (diagramObject && diagramObject.style.rotation);
-        var shapeId = $ax.style.GetShapeIdFromText(textId);
+    var _updateLinkLocations = $ax.annotation.updateLinkLocations = function(elementId) {
+        var textId = $ax.GetTextPanelId(elementId);
+        if(!textId) return;
 
-        //we have to do this because webkit reports the post-transform position but when you set
-        //positions it's pre-transform
+        var rotation = $ax.getObjectFromElementId(elementId).style.rotation;
+        //we have to do this because webkit reports the post-transform position but when you set positions it's pre-transform
         if(WEBKIT && rotation) {
             //we can dynamiclly rotate a widget now, show need to remember the transform rather than just remove it
             //here jquery.css will return 'none' if element is display none
-            var oldShapeTransform = document.getElementById(shapeId).style['-webkit-transform'];
+            var oldShapeTransform = document.getElementById(elementId).style['-webkit-transform'];
             var oldTextTransform = document.getElementById(textId).style['-webkit-transform'];
-            $('#' + shapeId).css('-webkit-transform', 'scale(1)');
+            $('#' + elementId).css('-webkit-transform', 'scale(1)');
             $('#' + textId).css('-webkit-transform', 'scale(1)');
         }
 
-        $('#' + textId).find('span[id$="_ann"]').each(function(index, value) {
+        $('#' + textId).find('div[id$="_ann"]').each(function(index, value) {
             var elementId = value.id.replace('_ann', '');
+            var $link = $('#' + elementId);
+            var annPos = $link.position();
+            annPos.left += $link.width();
+            //var annPos = $(value).position();
+            var left = annPos.left;// - NOTE_SIZE;
+            var top = annPos.top - 5;
 
-            var annPos = $(value).position();
-            var left = annPos.left - NOTE_SIZE;
-            var top = annPos.top;
-
-            $('#' + elementId + 'Note').css('left', left).css('top', top);
+            $(value).css('left', left).css('top', top);
         });
 
         //undo the transform reset
         if(WEBKIT && rotation) {
-            $('#' + shapeId).css('-webkit-transform', oldShapeTransform || '');
+            $('#' + elementId).css('-webkit-transform', oldShapeTransform || '');
             $('#' + textId).css('-webkit-transform', oldTextTransform || '');
         }
     };
 
-    var dialogs = {};
-    $ax.annotation.ToggleWorkflow = function(event, id, width, height) {
+    var _toggleAnnotationDialog = function (elementId, event) {
+            var win = $(window);
+            var scrollY = win.scrollTop();
+            var scrollX = win.scrollLeft();
 
-        if(dialogs[id]) {
-            var $dialog = dialogs[id];
-            // reset the dialog
-            dialogs[id] = undefined;
-            if($dialog.dialog("isOpen")) {
-                $dialog.dialog("close");
-                return;
-            }
-        }
+        var messageData = { id: elementId, x: event.pageX - scrollX, y: event.pageY - scrollY }
+        if (!$axure.utils.isInPlayer()) messageData.page = $ax.pageData.notesData;
+        $ax.messageCenter.postMessage('toggleAnnDialog', messageData);
+    }
+    
+    $ax.annotation.initialize = function () {
+        _createFootnotes($ax('*'), true);
+    }
 
-        // we'll need to save the scroll position just for stupid IE which will skip otherwise
-        var win = $(window);
-        var scrollY = win.scrollTop();
-        var scrollX = win.scrollLeft();
-
-        var bufferH = 10;
-        var bufferV = 10;
-        var blnLeft = false;
-        var blnAbove = false;
-        var sourceTop = event.pageY - scrollY;
-        var sourceLeft = event.pageX - scrollX;
-
-        if(sourceLeft > width + bufferH) {
-            blnLeft = true;
-        }
-        if(sourceTop > height + bufferV) {
-            blnAbove = true;
-        }
-
-        var top = 0;
-        var left = 0;
-        if(blnAbove) top = sourceTop - height - 20;
-        else top = sourceTop + 10;
-        if(blnLeft) left = sourceLeft - width - 4;
-        else left = sourceLeft - 6;
-
-        $ax.globals.MaxZIndex = $ax.globals.MaxZIndex + 1;
-        if(IE_10_AND_BELOW) height += 50;
-
-        var dObj = $ax.getObjectFromElementId(id);
-        var ann = dObj.annotation;
-        var $dialog = $('<div></div>')
-            .appendTo('body')
-            .html($ax.legacy.GetAnnotationHtml(ann))
-            .dialog({
-                title: dObj.label,
-                width: width,
-                height: height,
-                minHeight: 150,
-                zIndex: $ax.globals.MaxZIndex,
-                position: [left, top],
-                dialogClass: 'dialogFix',
-                autoOpen: false
-            });
-        $dialog.parent().appendTo('#base');
-        $dialog.dialog('open');
-        dialogs[id] = $dialog;
-
-        // scroll ... just for IE
-        window.scrollTo(scrollX, scrollY);
-    };
-
-    $ax.annotation.InitializeAnnotations = function (query) {
+    var _createFootnotes = $ax.annotation.createFootnotes = function(query, create) {
         if(!$ax.document.configuration.showAnnotations) return;
+        
+        var widgetNotes = $ax.pageData.notesData.widgetNotes;
+        if (widgetNotes) {
+            var ownerToFns = $ax.pageData.notesData.ownerToFns;
+            if(!$.isEmptyObject(ownerToFns)) {
+                query.each(function(dObj, elementId) {
+                    var fns = ownerToFns[dObj.id];
+                    if (fns !== undefined) {
+                        var elementIdQuery = $('#' + elementId);
+                        if (dObj.type == 'hyperlink') {
+                            var parentId = $ax.GetParentIdFromLink(elementId);
+                            if (create) {
+                                elementIdQuery.after("<div id='" + elementId + "_ann' class='annnote'>&#8203;</div>");
+                                appendFns($('#' + elementId + "_ann"), fns);
+                            }
+                            _updateLinkLocations(parentId);
+                        } else {
+                            if (create) {
+                                elementIdQuery.after("<div id='" + elementId + "_ann' class='annnote'>&#8203;</div>");
+                                appendFns($('#' + elementId + "_ann"), fns);
+                            }
+                            _adjustIconLocation(elementId, dObj);
+                        }
 
-        query.each(function(dObj, elementId) {
-            if(!dObj.annotation) return;
+                        if (create) {
+                            $('#' + elementId + "_ann").click(function (e) {
+                                _toggleAnnotationDialog(dObj.id, e);
+                                return false;
+                            });
 
-            if(dObj.type == 'hyperlink') {
-                var textId = $ax.style.GetTextIdFromLink(elementId);
-
-                var elementIdQuery = $('#' + elementId);
-                elementIdQuery.after("<span id='" + elementId + "_ann'>&#8203;</span>");
-
-                if($ax.document.configuration.useLabels) {
-                    var label = $('#' + elementId).attr("data-label");
-                    if(!label || label == "") label = "?";
-                    $('#' + textId).append("<div id='" + elementId + "Note' class='annnotelabel' >" + label + "</div>");
-                } else {
-                    $('#' + textId).append("<div id='" + elementId + "Note' class='annnoteimage' ></div>");
-                }
-                $('#' + elementId + 'Note').click(function(e) {
-                    $ax.annotation.ToggleWorkflow(e, elementId, 300, 200, false);
-                    return false;
-                });
-
-                _updateLinkLocations(textId);
-            } else {
-                if($ax.document.configuration.useLabels) {
-                    var label = $('#' + elementId).attr("data-label");
-                    if(!label || label == "") label = "?";
-                    $('#' + elementId + "_ann").append("<div id='" + elementId + "Note' class='annnotelabel'>" + label + "</div>");
-                } else {
-                    $('#' + elementId + "_ann").append("<div id='" + elementId + "Note' class='annnoteimage'></div>");
-                }
-                $('#' + elementId + 'Note').click(function(e) {
-                    $ax.annotation.ToggleWorkflow(e, elementId, 300, 200, false);
-                    return false;
+                            var isVisible = true;
+                            var isMaster = $ax.public.fn.IsReferenceDiagramObject(dObj.type);
+                            if (isMaster) isVisible = dObj.visible;
+                            else isVisible = $ax.visibility.IsIdVisible(elementId);
+                            if (!isVisible) {
+                                var ann = document.getElementById(elementId + "_ann");
+                                if (ann) $ax.visibility.SetVisible(ann, false);
+                            }
+                        }
+                    }
                 });
             }
+        }
 
-            $('#' + elementId + 'Note.annnoteimage').append("<div class='annnoteline'></div><div class='annnoteline'></div><div class='annnoteline'></div>");
-        });
+        function appendFns($parent, fns) {
+            for (var index = 0; index < fns.length; index++) {
+                $parent.append("<div class='annnotelabel' >" + fns[index] + "</div>");
+            }
+        }
     };
+
+    $ax.annotation.updateAllFootnotes = function () {
+        _createFootnotes($ax('*'), false);
+    }
 
     $ax.annotation.jQueryAnn = function(query) {
         var elementIds = [];
@@ -156,21 +120,42 @@ $axure.internal(function($ax) {
     };
 
     $(window.document).ready(function() {
-        $ax.annotation.InitializeAnnotations($ax(function(dObj) { return dObj.annotation; }));
+        //$ax.annotation.InitializeAnnotations($ax(function(dObj) { return dObj.annotation; }));
 
         $ax.messageCenter.addMessageListener(function(message, data) {
             //If the annotations are being hidden via the Sitemap toggle button, hide any open dialogs
             if(message == 'annotationToggle') {
-                if(data == false) {
-                    for(var index in dialogs) {
-                        var $dialog = dialogs[index];
-                        if($dialog.dialog("isOpen")) {
-                            $dialog.dialog("close");
-                        }
-                    }
+                if (data == true) {
+                    $('div.annnote').show();
+                } else {
+                    $('div.annnote').hide();
                 }
             }
         });
     });
 
+    //adjust annotation location to a element's top right corner
+    var _adjustIconLocation = $ax.annotation.adjustIconLocation = function(id, dObj) {
+        var ann = document.getElementById(id + "_ann");
+        if(ann) {
+            var corners = $ax.public.fn.getCornersFromComponent(id);
+            var width = $(ann).width();
+            var newTopRight = $ax.public.fn.vectorPlus(corners.relativeTopRight, corners.centerPoint);
+            //note size is 14x8, this is how rp calculated it as well
+            ann.style.left = (newTopRight.x - width) + "px";
+
+            var elementType = dObj ? dObj.type : $ax.getTypeFromElementId(id);
+            var yOffset = $ax.public.fn.IsTableCell(elementType) ? 0 : -8;
+            ann.style.top = (newTopRight.y + yOffset) + "px";
+        }
+
+        var ref = document.getElementById(id + "_ref");
+        if(ref) {
+            if(!corners) corners = $ax.public.fn.getCornersFromComponent(id);
+            var newBottomRight = $ax.public.fn.vectorPlus(corners.relativeBottomRight, corners.centerPoint);
+
+            ref.style.left = (newBottomRight.x - 8) + 'px';
+            ref.style.top = (newBottomRight.y - 10) + 'px';
+        }
+    }
 });

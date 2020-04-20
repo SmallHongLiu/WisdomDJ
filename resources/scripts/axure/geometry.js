@@ -42,10 +42,10 @@ $axure.internal(function($ax) {
 
 
     var _genRect = function(info, roundHalfPixel) {
-        var x = info.pagex;
-        var y = info.pagey;
-        var w = info.width;
-        var h = info.height;
+        var x = info.pagex();
+        var y = info.pagey();
+        var w = info.width();
+        var h = info.height();
 
         if(roundHalfPixel) {
             if(x % 1 != 0) {

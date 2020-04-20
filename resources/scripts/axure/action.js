@@ -337,7 +337,7 @@
         state.used += duration;
         var options = state.queue[0].actionInfo;
         if(options.options) options = options.options;
-        var optionDur = options.duration || 0;
+        var optionDur = (options.easing && options.easing != 'none' && options.duration) || 0;
         if(optionDur <= state.used) {
             $ax.splice(state.queue, 0, 1);
             state.used = 0;
@@ -411,18 +411,30 @@
             }
 
             if(url) {
+                let useStartHtml = shouldUseStartHtml(action);
+                if(useStartHtml) {
+                    //use start.html to load player
+                    url = urlWithStartHtml(url);
+                    //collapse player for popup
+                    if(action.linkType == "popup") url = urlWithCollapseSitemap(url);
+                }
+                
+                //set useGlobalVarNameInUrl to true to use GLOBAL_VAR_NAME in the url, so player knows how to parse it
+                //without this, we are assuming everything after '#' are global vars 
                 if(action.linkType == "popup") {
                     $ax.navigate({
                         url: url,
                         target: action.linkType,
                         includeVariables: includeVars,
-                        popupOptions: action.popup
+                        popupOptions: action.popup,
+                        useGlobalVarNameInUrl : useStartHtml
                     });
                 } else {
                     $ax.navigate({
                         url: url,
                         target: action.linkType,
-                        includeVariables: includeVars
+                        includeVariables: includeVars,
+                        useGlobalVarNameInUrl : useStartHtml
                     });
                 }
             }
@@ -431,6 +443,24 @@
 
         _dispatchAction(eventInfo, actions, index + 1);
     };
+    
+    //use start.html will add a player to the prototype
+    var shouldUseStartHtml = function(linkAction) {
+        return linkAction.target.targetType == 'page' //only adding player for page, not external links
+               && (linkAction.linkType == "popup" || linkAction.linkType == "new") //only add for popup and new tabs
+               && $axure.utils.isInPlayer() //allow user to view without player (maybe useful for user testing)
+               && !$axure.utils.isShareApp() //share app use special handling on its link, add start.html breaks the handling
+    }
+    
+    var urlWithStartHtml = function(url) {
+        var pageName = url.substring(0, url.lastIndexOf('.html'));
+        var pageHash = $axure.utils.setHashStringVar(START_URL_NAME, PAGE_URL_NAME, pageName);
+        return START_URL_NAME + pageHash;
+    }
+    
+    var urlWithCollapseSitemap = function(url) {
+        return url + '&' + SITEMAP_COLLAPSE_VAR_NAME + '=' + SITEMAP_COLLAPSE_VALUE;
+    }
 
     var _includeVars = function(target, eventInfo) {
         if(target.includeVariables) return true;
@@ -648,18 +678,18 @@
         _dispatchAction(eventInfo, actions, index + 1);
     };
 
-    var _compoundChildrenShallow = function (id) {
-        var deep = [];
-        var children = $ax('#' + id).getChildren()[0].children;
-        var piecePrefix = id + 'p';
+    //var _compoundChildrenShallow = function (id) {
+    //    var deep = [];
+    //    var children = $ax('#' + id).getChildren()[0].children;
+    //    var piecePrefix = id + 'p';
 
-        for (var i = 0; i < children.length; i++) {
-            if(children[i].substring(0, id.length + 1) == piecePrefix) {
-                deep.push(children[i]);
-            }
-        }
-        return deep;
-    };
+    //    for (var i = 0; i < children.length; i++) {
+    //        if(children[i].substring(0, id.length + 1) == piecePrefix) {
+    //            deep.push(children[i]);
+    //        }
+    //    }
+    //    return deep;
+    //};
 
     var _addMove = function (elementId, eventInfo, moveInfo, optionsOverride) {
         var eventInfoCopy = $ax.eventCopy(eventInfo);
@@ -681,8 +711,9 @@
             animations.push({
                 id: elementId,
                 type: queueTypes.move,
-                func: function() {
-                    var layerInfo = $ax.public.fn.getWidgetBoundingRect(elementId);
+                func: function () {
+                    var layerInfo = $ax('#' + elementId).offsetBoundingRect();
+                    //var layerInfo = $ax.public.fn.getWidgetBoundingRect(elementId);
                    var deltaLoc = _getMoveLoc(elementId, moveInfo, eventInfoCopy, optionsOverride.stop, idToResizeMoveState[elementId], options, layerInfo);
 //                    $ax.event.raiseSyntheticEvent(elementId, "onMove");
                     $ax.visibility.pushContainer(elementId, false);
@@ -723,6 +754,11 @@
     };
 
     var _moveSingleWidget = function (elementId, delta, options, onComplete) {
+        if(!delta.x && !delta.y) {
+            $ax.action.fireAnimationFromQueue(elementId, $ax.action.queueTypes.move);
+            if (onComplete) onComplete();
+            return;
+        }
         var fixedInfo = $ax.dynamicPanelManager.getFixedInfo(elementId);
         var xProp = 'left';
         var xDiff = '+=';
@@ -748,14 +784,18 @@
         var css = {};
         css[xProp] = xDiff + delta.x;
         css[yProp] = yDiff + delta.y;
-        var moveInfo = $ax.move.RegisterMoveInfo(elementId, delta.x, delta.y,false, options);
-        $jobj(elementId).animate(css, {
+
+        $ax.visibility.moveMovedLocation(elementId, delta.x, delta.y);
+
+        var moveInfo = $ax.move.PrepareForMove(elementId, delta.x, delta.y,false, options);
+        $jobjAll(elementId).animate(css, {
             duration: options.duration,
             easing: options.easing,
             queue: false,
             complete: function () {
                 if(onComplete) onComplete();
                 if(moveInfo.rootLayer) $ax.visibility.popContainer(moveInfo.rootLayer, false);
+                $ax.dynamicPanelManager.fitParentPanel(elementId);
                 $ax.action.fireAnimationFromQueue(elementId, $ax.action.queueTypes.move);
             }
         });
@@ -799,8 +839,11 @@
             //    startX = dimensions.left;
             //    startY = dimensions.top;
             } else {
-                startX = $ax('#' + elementId).locRelativeIgnoreLayer(false);
-                startY = $ax('#' + elementId).locRelativeIgnoreLayer(true);
+                var offsetLocation = $ax('#' + elementId).offsetLocation();
+                startX = offsetLocation.left;
+                startY = offsetLocation.top;
+                //startX = $ax('#' + elementId).locRelativeIgnoreLayer(false);
+                //startY = $ax('#' + elementId).locRelativeIgnoreLayer(true);
                 if(jobj.css('position') == 'fixed') {
                     startX -= $(window).scrollLeft();
                     startY -= $(window).scrollTop();
@@ -842,8 +885,12 @@
             var location = widgetDragInfo.movedWidgets[eventInfoCopy.targetElement];
             if (location) {
                 var axObj = $ax('#' + eventInfoCopy.targetElement);
-                xValue = location.x - axObj.left();
-                yValue = location.y - axObj.top();
+                //This may require using the css value
+                var viewportLocation = axObj.viewportLocation();
+                xValue = location.x - viewportLocation.left;
+                yValue = location.y - viewportLocation.top;
+                //xValue = location.x - axObj.left();
+                //yValue = location.y - axObj.top();
             } else {
                 _fireAnimationFromQueue(eventInfoCopy.srcElement, queueTypes.move);
                 return { x: 0, y: 0 };
@@ -865,13 +912,13 @@
         if (options && options.boundaryExpr) {
             //$ax.public.fn.removeCompound(jobj);
 
-            if(jobj.css('position') == 'fixed') {
-                //swap page coordinates with fixed coordinates
-                options.boundaryExpr.leftExpr.value = options.boundaryExpr.leftExpr.value.replace('.top', '.topfixed').replace('.left', '.leftfixed').replace('.bottom', '.bottomfixed').replace('.right', '.rightfixed');
-                options.boundaryExpr.leftExpr.stos[0].leftSTO.prop = options.boundaryExpr.leftExpr.stos[0].leftSTO.prop + 'fixed';
-                options.boundaryStos.boundaryScope.direcval0.value = options.boundaryStos.boundaryScope.direcval0.value.replace('.top', '.topfixed').replace('.left', '.leftfixed').replace('.bottom', '.bottomfixed').replace('.right', '.rightfixed');
-                options.boundaryStos.boundaryScope.direcval0.stos[0].leftSTO.prop = options.boundaryStos.boundaryScope.direcval0.stos[0].leftSTO.prop + 'fixed';
-            }
+            //if(jobj.css('position') == 'fixed') {
+            //    //swap page coordinates with fixed coordinates
+            //    options.boundaryExpr.leftExpr.value = options.boundaryExpr.leftExpr.value.replace('.top', '.topfixed').replace('.left', '.leftfixed').replace('.bottom', '.bottomfixed').replace('.right', '.rightfixed');
+            //    options.boundaryExpr.leftExpr.stos[0].leftSTO.prop = options.boundaryExpr.leftExpr.stos[0].leftSTO.prop + 'fixed';
+            //    options.boundaryStos.boundaryScope.direcval0.value = options.boundaryStos.boundaryScope.direcval0.value.replace('.top', '.topfixed').replace('.left', '.leftfixed').replace('.bottom', '.bottomfixed').replace('.right', '.rightfixed');
+            //    options.boundaryStos.boundaryScope.direcval0.stos[0].leftSTO.prop = options.boundaryStos.boundaryScope.direcval0.stos[0].leftSTO.prop + 'fixed';
+            //}
 
             if(moveWithThis && (xValue || yValue)) {
                 _updateLeftExprVariable(options.boundaryExpr, xValue.toString(), yValue.toString());
@@ -897,8 +944,11 @@
                         startX = layerInfo.left;
                         startY = layerInfo.top;
                     } else {
-                        startX = $ax('#' + elementId).locRelativeIgnoreLayer(false);
-                        startY = $ax('#' + elementId).locRelativeIgnoreLayer(true);
+                        offsetLocation = $ax('#' + elementId).offsetLocation();
+                        startX = offsetLocation.left;
+                        startY = offsetLocation.top;
+                        //startX = $ax('#' + elementId).locRelativeIgnoreLayer(false);
+                        //startY = $ax('#' + elementId).locRelativeIgnoreLayer(true);
                         if(jobj.css('position') == 'fixed') {
                             startX -= $(window).scrollLeft();
                             startY -= $(window).scrollTop();
@@ -1002,7 +1052,8 @@
                 id: elementId,
                 type: queueTypes.rotate,
                 func: function () {
-                    var boundingRect = $axure.fn.getWidgetBoundingRect(elementId);
+                    var boundingRect = $ax('#' + elementId).offsetBoundingRect();
+                    //var boundingRect = $axure.fn.getWidgetBoundingRect(elementId);
                     eval(boundingRect);
                     centerPoint = boundingRect.centerPoint;
                     centerPoint.x += offset.x;
@@ -1062,13 +1113,8 @@
                     }
 
                     $ax.event.raiseSyntheticEvent(elementId, 'onRotate');
-                    if(offset.x == 0 && offset.y == 0) {
-                        _rotateSingle(elementId, rotateDegree, rotateInfo.rotateType == 'location', delta, options, options.stop);
-                        _fireAnimationFromQueue(elementId, queueTypes.move);
-                        if(moveInfo) $ax.event.raiseSyntheticEvent(elementId, 'onMove');
-                        return;
-                    }
-                    _rotateSingleOffset(elementId, rotateDegree, rotateInfo.rotateType == 'location', delta, { x: offset.x, y: offset.y }, options, options.stop);
+                    if(offset.x == 0 && offset.y == 0) _rotateSingle(elementId, rotateDegree, rotateInfo.rotateType == 'location', delta, options, options.stop, true);
+                    else _rotateSingleOffset(elementId, rotateDegree, rotateInfo.rotateType == 'location', delta, { x: offset.x, y: offset.y }, options, options.stop);
                     if(moveInfo) $ax.event.raiseSyntheticEvent(elementId, 'onMove');
                 }
             });
@@ -1085,10 +1131,13 @@
         if (anchor.indexOf('bottom') != -1) offset.y += boundingRect.height / 2;
     }
 
-    var _rotateSingle = function(elementId, rotateDegree, rotateTo, delta, options, stop) {
+    var _rotateSingle = function(elementId, rotateDegree, rotateTo, delta, options, stop, handleMove) {
         var degreeDelta = _applyRotateStop(rotateDegree, $ax.move.getRotationDegree(elementId), rotateTo, stop);
         $ax('#' + elementId).rotate(degreeDelta, options.easing, options.duration, false, true);
-        if(delta.x || delta.y) _moveSingleWidget(elementId, delta, options);
+        if(handleMove) {
+            if (delta.x || delta.y) _moveSingleWidget(elementId, delta, options);
+            else $ax.action.fireAnimationFromQueue(elementId, $ax.action.queueTypes.move);
+        }
     };
 
     var _rotateSingleOffset = function (elementId, rotateDegree, rotateTo, delta, offset, options, stop, resizeOffset) {
@@ -1101,7 +1150,8 @@
         }
 
         var degreeDelta = _applyRotateStop(rotateDegree, currRotation, rotateTo, stop);
-        var widgetCenter = $axure.fn.getWidgetBoundingRect(elementId).centerPoint;
+        var widgetCenter = $ax('#' + elementId).offsetBoundingRect().centerPoint;
+        //var widgetCenter = $axure.fn.getWidgetBoundingRect(elementId).centerPoint;
         
         var rotate = $.inArray(obj.type, widgetRotationFilter) != -1;
         $ax('#' + elementId).circularMoveAndRotate(degreeDelta, options, widgetCenter.x + offset.x, widgetCenter.y + offset.y, rotate, delta, resizeOffset);
@@ -1202,14 +1252,15 @@
                 type: queueTypes.resize,
                 func: function () {
                     $ax.visibility.pushContainer(elementId, false);
-                    boundingRect = $ax.public.fn.getWidgetBoundingRect(elementId);
+                    boundingRect = $ax('#' + elementId).offsetBoundingRect();
+                    //boundingRect = $ax.public.fn.getWidgetBoundingRect(elementId);
                     var size = _getSizeFromInfo(resizeInfo, eventInfoCopy, boundingRect.width, boundingRect.height, elementId);
                     deltaLoc = { x: 0, y: 0 };
 
                     var stop = options.stop;
                     var ratio = stop.instant ? 1 : (stop.end - stop.start) / (stop.len - stop.start);
-                    widthChangedPercent = (size.width - boundingRect.width) / boundingRect.width * ratio;
-                    heightChangedPercent = (size.height - boundingRect.height) / boundingRect.height * ratio;
+                    widthChangedPercent = Math.round(size.width - boundingRect.width) / boundingRect.width * ratio;
+                    heightChangedPercent = Math.round(size.height - boundingRect.height) / boundingRect.height * ratio;
                     resizeOffset = _applyAnchorToResizeOffset(widthChangedPercent * boundingRect.width, heightChangedPercent * boundingRect.height, resizeInfo.anchor);
                     if(stop.instant || stop.end == stop.len) idToResizeMoveState[elementId].resizeResult = undefined;
 
@@ -1254,7 +1305,7 @@
                         func: function() {
                             //$ax.event.raiseSyntheticEvent(childId, 'onResize');
                             if(isLayer) {
-                                completeCount--;
+                                completeCount -= 2;
                                 _fireAnimationFromQueue(childId, queueTypes.resize);
                                 $ax.event.raiseSyntheticEvent(childId, 'onResize');
                             } else {
@@ -1278,7 +1329,7 @@
                             }
                         }
                     });
-                    if(!isLayer && moves) animations.push({ id: childId, type: queueTypes.move, func: function () {} });
+                    if(!isLayer) animations.push({ id: childId, type: queueTypes.move, func: function () {} });
                     if(!isLayer && rotateInfo) animations.push({ id: childId, type: queueTypes.rotate, func: function () {} });
                 })(childrenIds[idIndex]);
             }
@@ -1302,8 +1353,8 @@
                     var size = _getSizeFromInfo(resizeInfo, eventInfoCopy, oldWidth, oldHeight, elementId);
                     var newWidth = size.width;
                     var newHeight = size.height;
-                    var deltaWidth = (newWidth - oldWidth)*ratio;
-                    var deltaHeight = (newHeight - oldHeight)*ratio;
+                    var deltaWidth = Math.round(newWidth - oldWidth) * ratio;
+                    var deltaHeight = Math.round(newHeight - oldHeight) * ratio;
                     newWidth = oldWidth + deltaWidth;
                     newHeight = oldHeight + deltaHeight;
 
@@ -1321,7 +1372,8 @@
                     if(rotateInfo) {
                         offset.x = Number($ax.expr.evaluateExpr(rotateInfo.offsetX, eventInfoCopy));
                         offset.y = Number($ax.expr.evaluateExpr(rotateInfo.offsetY, eventInfoCopy));
-                        _updateOffset(offset, rotateInfo.anchor, $axure.fn.getWidgetBoundingRect(elementId));
+                        _updateOffset(offset, rotateInfo.anchor, $ax('#' + elementId).offsetBoundingRect());
+                        //_updateOffset(offset, rotateInfo.anchor, $axure.fn.getWidgetBoundingRect(elementId));
                         rotateHandlesMove = Boolean(rotateInfo && (offset.x || offset.y || rotateInfo.anchor != 'center'));
                         $ax.event.raiseSyntheticEvent(elementId, 'onRotate');
                     }
@@ -1344,8 +1396,9 @@
                         } else {
                             // Not handling move so pass in nop delta
                             _rotateSingle(elementId, rotateDegree, rotateInfo.rotateType == 'location', { x: 0, y: 0 }, options, options.rotateStop);
+                            if (moves) _fireAnimationFromQueue(elementId, queueTypes.move);
                         }
-                    } else _moveSingleWidget(elementId, delta, options);
+                    } else if(!css && moves) _moveSingleWidget(elementId, delta, options);
 
                     // Have to do it down here to make sure move info is registered
                     if(moveInfo) $ax.event.raiseSyntheticEvent(elementId, 'onMove');
@@ -1357,7 +1410,6 @@
                         });
                     } else {
                         _fireAnimationFromQueue(elementId, queueTypes.resize);
-                        if(moves && !rotateHandlesMove) _fireAnimationFromQueue(elementId, queueTypes.move);
 
                         $ax.event.raiseSyntheticEvent(elementId, 'onResize');
                     }
@@ -1464,7 +1516,18 @@
         var jobj = $jobj(elementId);
         //if this is pinned dp, we will mantain the pin, no matter how you resize it; so no need changes left or top
         //NOTE: currently only pinned DP has position == fixed
-        if(jobj.css('position') == 'fixed') return css;
+        if(jobj.css('position') == 'fixed') {
+            if(obj.fixedHorizontal && obj.fixedHorizontal == 'center') css['margin-left'] = '+=' + delta.x;
+            if(obj.fixedVertical && obj.fixedVertical == 'middle') css['margin-top'] = '+=' + delta.y;
+            return css;
+        }
+
+        // If it is pinned, but temporarily not fixed because it is wrappen in a container, then just make sure to anchor it correctly
+        if(obj.fixedVertical) {
+            if(obj.fixedVertical == 'middle') anchor = obj.fixedHorizontal;
+            else anchor = obj.fixedVertical + (obj.fixedHorizontal == 'center' ? '' : ' ' + obj.fixedHorizontal);
+            
+        }
 
         //use position relative to parents
         //var position = obj.generateCompound ? $ax.public.fn.getWidgetBoundingRect(elementId) : $ax.public.fn.getPositionRelativeToParent(elementId);
@@ -1498,20 +1561,27 @@
                 css.top = $ax.getNumFromPx(jobj.css('top')) + locationShift.y + delta.y;
             } else {
                 var axQuery = $ax('#' + elementId);
-                css.left = axQuery.left(true) + locationShift.x + delta.x;
-                css.top = axQuery.top(true) + locationShift.y + delta.y;
+                var offsetLocation = axQuery.offsetLocation();
+                css.left = offsetLocation.left + locationShift.x + delta.x;
+                css.top = offsetLocation.top + locationShift.y + delta.y;
+                //css.left = axQuery.left(true) + locationShift.x + delta.x;
+                //css.top = axQuery.top(true) + locationShift.y + delta.y;
             }
         } else {
             delta.x += locationShift.x;
             delta.y += locationShift.y;
         }
 
+        css.deltaX = locationShift.x + delta.x;
+        css.deltaY = locationShift.y + delta.y;
+
         return css;
     };
 
 
     var _getCssForResizingLayerChild = function (elementId, anchor, layerBoundingRect, widthChangedPercent, heightChangedPercent, deltaLoc) {
-        var boundingRect = $ax.public.fn.getWidgetBoundingRect(elementId);
+        var boundingRect = $ax('#' + elementId).offsetBoundingRect();
+        //var boundingRect = $ax.public.fn.getWidgetBoundingRect(elementId);
         var childCenterPoint = boundingRect.centerPoint;
 
         var currentSize = $ax('#' + elementId).size();
@@ -1527,36 +1597,58 @@
         if($ax.dynamicPanelManager.isPercentWidthPanel(obj)) changeLeft = false;
         else css.width = newWidth;
 
-
         var jobj = $jobj(elementId);
         //if this is pinned dp, we will mantain the pin, no matter how you resize it; so no need changes left or top
         //NOTE: currently only pinned DP has position == fixed
         if(jobj.css('position') == 'fixed') return css;
         //use bounding rect position relative to parents to calculate delta
-        var axObj = $ax('#' + elementId);
+        //var axObj = $ax('#' + elementId);
         // This will be absolute world coordinates, but we want body coordinates.
-        var currentLeft = axObj.locRelativeIgnoreLayer(false);
-        var currentTop = axObj.locRelativeIgnoreLayer(true);
+        var offsetLocation = $ax('#' + elementId).offsetLocation();
+        var currentLeft = offsetLocation.left;
+        var currentTop = offsetLocation.top;
+        //var currentLeft = axObj.locRelativeIgnoreLayer(false);
+        //var currentTop = axObj.locRelativeIgnoreLayer(true);
 
-        if(anchor.indexOf("center") > -1) {
-            var topDelta = (childCenterPoint.y - layerBoundingRect.centerPoint.y) * heightChangedPercent - currentSize.height * heightChangedPercent / 2;
-            if(changeLeft) var leftDelta = (childCenterPoint.x - layerBoundingRect.centerPoint.x) * widthChangedPercent - currentSize.width * widthChangedPercent / 2;
-        } else {
-            if(anchor.indexOf("top") > -1) {
-                topDelta = (currentTop - layerBoundingRect.top) * heightChangedPercent;
-            } else if(anchor.indexOf("bottom") > -1) {
-                topDelta = (currentTop - layerBoundingRect.bottom) * heightChangedPercent;
-            } else {
-                topDelta = (childCenterPoint.y - layerBoundingRect.centerPoint.y) * heightChangedPercent - currentSize.height * heightChangedPercent / 2;
+        var resizable = $ax.public.fn.IsResizable(obj.type);
+        if(anchor.indexOf("top") > -1) {
+            var topDelta = (currentTop - layerBoundingRect.top) * heightChangedPercent;
+            if(!resizable && Math.round(topDelta)) topDelta += currentSize.height * heightChangedPercent;
+        } else if(anchor.indexOf("bottom") > -1) {
+            if(resizable) topDelta = (currentTop - layerBoundingRect.bottom) * heightChangedPercent;
+            else {
+                var bottomDelta = Math.round(currentTop + currentSize.height - layerBoundingRect.bottom) * heightChangedPercent;
+                if(bottomDelta) topDelta = bottomDelta - currentSize.height * heightChangedPercent;
+                else topDelta = 0;
             }
+        } else { //center vertical
+            if(resizable) topDelta = (childCenterPoint.y - layerBoundingRect.centerPoint.y)*heightChangedPercent - currentSize.height*heightChangedPercent/2;
+            else {
+                var centerTopChange = Math.round(childCenterPoint.y - layerBoundingRect.centerPoint.y)*heightChangedPercent;
+                if(centerTopChange > 0) topDelta = centerTopChange + Math.abs(currentSize.height * heightChangedPercent / 2);
+                else if(centerTopChange < 0) topDelta = centerTopChange - Math.abs(currentSize.height * heightChangedPercent / 2);
+                else topDelta = 0;
+            }
+        }
 
-            if(changeLeft) {
-                if(anchor.indexOf("left") > -1) {
-                    leftDelta = (currentLeft - layerBoundingRect.left) * widthChangedPercent;
-                } else if(anchor.indexOf("right") > -1) {
-                    leftDelta = (currentLeft - layerBoundingRect.right) * widthChangedPercent;
-                } else {
-                    leftDelta = (childCenterPoint.x - layerBoundingRect.centerPoint.x) * widthChangedPercent - currentSize.width * widthChangedPercent / 2;
+        if(changeLeft) {
+            if(anchor.indexOf("left") > -1) {
+                var leftDelta = (currentLeft - layerBoundingRect.left) * widthChangedPercent;
+                if(!resizable && Math.round(leftDelta)) leftDelta += currentSize.width * widthChangedPercent;
+            } else if(anchor.indexOf("right") > -1) {
+                if(resizable) leftDelta = (currentLeft - layerBoundingRect.right) * widthChangedPercent;
+                else {
+                    var rightDelta = Math.round(currentLeft + currentSize.width - layerBoundingRect.right) * widthChangedPercent;
+                    if(rightDelta) leftDelta = rightDelta - currentSize.width * widthChangedPercent;
+                    else leftDelta = 0;
+                }
+            } else { //center horizontal
+                if(resizable) leftDelta = (childCenterPoint.x - layerBoundingRect.centerPoint.x)*widthChangedPercent - currentSize.width*widthChangedPercent/2;
+                else {
+                    var centerLeftChange = Math.round(childCenterPoint.x - layerBoundingRect.centerPoint.x) * widthChangedPercent;
+                    if(centerLeftChange > 0) leftDelta = centerLeftChange + Math.abs(currentSize.width * widthChangedPercent / 2);
+                    else if(centerLeftChange < 0) leftDelta = centerLeftChange - Math.abs(currentSize.width * widthChangedPercent / 2);
+                    else leftDelta = 0;
                 }
             }
         }
@@ -1852,7 +1944,8 @@
         eventInfo.image = true;
         for(var i = 0; i < action.imagesToSet.length; i++) {
             var imgInfo = action.imagesToSet[i];
-            imgInfo = view ? imgInfo.adaptive[view] : imgInfo.base;
+            if (view && imgInfo.adaptive[view]) imgInfo = imgInfo.adaptive[view];
+            else imgInfo = imgInfo.base;
             var elementIds = $ax.getElementIdsFromPath(action.imagesToSet[i].objectPath, eventInfo);
 
             for(var j = 0; j < elementIds.length; j++) {
@@ -1873,14 +1966,18 @@
                     var currIndex = $ax.event.mouseOverIds.indexOf($ax.event.mouseOverObjectId);
                     var imgIndex = $ax.event.mouseOverIds.indexOf(elementId);
                     if(currIndex < imgIndex) $ax.event.mouseOverObjectId = elementId;
+                } else if(imgInfo.mouseOver && elementId == eventInfo.srcElement) {
+                    img = evaluatedImgs.mouseOver;
                 }
 
                 //            $('#' + $ax.repeater.applySuffixToElementId(elementId, '_img')).attr('src', img);
-                $jobj($ax.style.GetImageIdFromShape(elementId)).attr('src', img);
+                $jobj($ax.GetImageIdFromShape(elementId)).attr('src', img);
 
                 //Set up overrides
                 $ax.style.mapElementIdToImageOverrides(elementId, evaluatedImgs);
                 $ax.style.updateElementIdImageStyle(elementId);
+
+                if(evaluatedImgs.mouseOver || evaluatedImgs.mouseDown) $ax.event.updateIxStyleEvents(elementId);
             }
         }
         eventInfo.targetElement = oldTarget;
@@ -1893,7 +1990,7 @@
         var retVal = {};
         for(var state in imgInfo) {
             if(!imgInfo.hasOwnProperty(state)) continue;
-            var img = imgInfo[state].path || $ax.expr.evaluateExpr(imgInfo[state].literal, eventInfo);
+            var img = imgInfo[state][$ax.adaptive.getSketchKey()] || $ax.expr.evaluateExpr(imgInfo[state].literal, eventInfo);
             if(!img) img = $axure.utils.getTransparentGifPath();
             retVal[state] = img;
         }
@@ -1957,6 +2054,7 @@
         //look for the nearest element id
 
         var objId = eventInfo.srcElement;
+        var thisWidget = eventInfo.thiswidget;
         var obj = $ax.getObjectFromElementId(objId);
         var rdoId = obj ? $ax.getRdoParentFromElementId(objId) : "";
         var rdo = $ax.getObjectFromElementId(rdoId);
@@ -1979,6 +2077,7 @@
                 var targetObj = isPage ? rdo : $ax.getObjectFromElementId(targetObjId);
 
                 eventInfo.srcElement = targetObjId || '';
+                eventInfo.thiswidget = $ax.getWidgetInfo(eventInfo.srcElement);
 
                 eventInfo.isMasterEvent = false;
                 var raisedEvents = firedEvent.raisedEventIds;
@@ -2006,6 +2105,7 @@
                 if(isPage) eventInfo.isMasterEvent = oldIsMasterEvent;
             }
             eventInfo.srcElement = objId;
+            eventInfo.thiswidget = thisWidget;
 
             eventInfo.isMasterEvent = oldIsMasterEvent;
         }
