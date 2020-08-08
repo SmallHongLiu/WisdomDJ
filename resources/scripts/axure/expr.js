@@ -309,10 +309,7 @@ $axure.internal(function($ax) {
             var id = ids[i];
 
             // If calling this on button shape, get the id of the rich text panel inside instead
-            var type = $obj(id).type;
-            if(type != 'richTextPanel' && type != 'hyperlink') {
-                id = $jobj(id).find('.text')[0].id;
-            }
+            if($obj(id).type !== $ax.constants.LINK_TYPE) id = $ax.GetTextPanelId(id, true);
 
             var element = window.document.getElementById(id);
             $ax.visibility.SetVisible(element, value != '');
@@ -320,6 +317,16 @@ $axure.internal(function($ax) {
             $ax.style.transformTextWithVerticalAlignment(id, function() {
                 var spans = $jobj(id).find('span');
                 if(plain) {
+                    // Can't set value as text because '<br/>' doesn't actually do a line break
+                    // Can't set vaule as html because it doesn't like '<' and ignores all after it
+                    // Create tags yourself
+                    var lines = value.split(/\r\n|\n/);
+                    //if we are dealing with only one line, just reuse the old one
+                    if(spans.length === 1 && lines.length === 1) {
+                        $(spans[0]).text(value);
+                        return;
+                    }
+
                     // Wrap in span and p, style them accordingly.
                     var span = $('<span></span>');
                     if(spans.length > 0) {
@@ -327,14 +334,10 @@ $axure.internal(function($ax) {
                         span.attr('id', $(spans[0]).attr('id'));
                     }
 
-                    // Can't set value as text because '<br/>' doesn't actually do a line break
-                    // Can't set vaule as html because it doesn't like '<' and ignores all after it
-                    // Create tags yourself
-                    var lines = value.split(/\r\n|\n/);
                     if(lines.length == 1) span.text(value);
                     else {
                         for(var i = 0; i < lines.length; i++) {
-                            if (i != 0) span.append($('<br />'));
+                            if(i != 0) span.append($('<br />'));
                             var line = lines[i];
                             if(line.length == 0) continue;
 
@@ -344,17 +347,20 @@ $axure.internal(function($ax) {
                         }
                     }
 
-                    var p = $('<p></p>');
                     var ps = $jobj(id).find('p');
-                    if(ps.length > 0) {
-                        p.attr('style', $(ps[0]).attr('style'));
-                        p.attr('id', $(ps[0]).attr('id'));
+                    if(ps && ps.length) {
+                        ps[0].innerHTML = $('<div></div>').append(span).html();;
+                        if(ps.length > 1) {
+                            for(var i = 1; i < ps.length; i++) {
+                                $(ps[i]).remove();
+                            }
+                        }
+                    } else {
+                        var p = $('<p></p>');
+                        p.append(span);
+                        element.innerHTML = $('<div></div>').append(p).html();
                     }
-                    p.append(span);
-                    finalValue = $('<div></div>').append(p).html();
-                }
-
-                element.innerHTML = finalValue;
+                } else element.innerHTML = finalValue;
             });
 
             if(!plain) $ax.style.CacheOriginalText(id, true);
@@ -363,6 +369,10 @@ $axure.internal(function($ax) {
 
     _exprFunctions.GetCheckState = function(ids) {
         return $ax('#' + ids[0]).selected();
+    };
+
+    _exprFunctions.GetDisabledState = function (ids) {
+        return !$ax('#' + ids[0]).enabled();
     };
 
     _exprFunctions.GetSelectedOption = function (ids) {
@@ -479,7 +489,6 @@ $axure.internal(function($ax) {
         var elementId = elementIds[0];
         var rects = new Object();
         var jObj = $jobj(elementId);
-        var axObj = $ax('#' + elementId);
         var invalid = jObj.length == 0;
         var parent = jObj;
         // Or are in valid if no obj can be found, or if it is not visible.
@@ -495,11 +504,18 @@ $axure.internal(function($ax) {
             return rects;
         }
 
+        var axObj = $ax('#' + elementId);
+        var boundingRect = axObj.viewportBoundingRect();
         rects.lastRect = new $ax.drag.Rectangle(
-                axObj.left(),
-                axObj.top(),
-                axObj.width(),
-                axObj.height());
+            boundingRect.left,
+            boundingRect.top,
+            boundingRect.width,
+            boundingRect.height);
+        //rects.lastRect = new $ax.drag.Rectangle(
+        //        axObj.left(),
+        //        axObj.top(),
+        //        axObj.width(),
+        //        axObj.height());
 
         rects.currentRect = rects.lastRect;
         return rects;
@@ -509,7 +525,16 @@ $axure.internal(function($ax) {
         return $ax.getWidgetInfo(elementId[0]);
     };
 
-    _exprFunctions.GetAdaptiveView = function() {
+    _exprFunctions.GetAdaptiveView = function (eventInfo) {
+        if (eventInfo && eventInfo.srcElement) {
+            var id = eventInfo.srcElement;
+            var diagramObject = $ax.getObjectFromElementId(id);
+            if (diagramObject.owner.type == 'Axure:Master') {
+                var viewIdChain = $ax.style.getViewIdChain($ax.adaptive.currentViewId || '', id, diagramObject);
+                if (viewIdChain.length > 0) return viewIdChain[viewIdChain.length - 1];
+                else return '19e82109f102476f933582835c373474';
+            }
+        }
         return $ax.adaptive.currentViewId || '';
     };
 

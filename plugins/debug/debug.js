@@ -6,83 +6,94 @@
     $(document).ready(function () {
         $axure.player.createPluginHost({
             id: 'debugHost',
-            context: 'interface',
-            title: 'CONSOLE',
+            context: 'inspect',
+            title: 'Console',
             gid: 3
         });
 
         generateDebug();
 
         $('#variablesClearLink').click(clearvars_click);
-        $('#traceClearLink').click(cleartrace_click);
+        $('#traceClear').click(cleartrace_click);
+        $('#traceToggle').click(stoptrace_click);
+        $('#traceStart').click(starttrace_click);
+        $('#traceClear').hide();
+        $('#traceToggle').hide();
 
-
-        $(document).on('ContainerHeightChange', function () {
-            updateContainerHeight();
-        });
-
-        //$('#traceContainer').hide();
-        //$('#debugTraceLink').click(function () {
-        //    $('#variablesContainer').hide();
-        //    $('#traceContainer').show();
-        //});
-        //$('#debugVariablesLink').click(function () {
-        //    $('#variablesContainer').show();
-        //    $('#traceContainer').hide();
-        //});
+        $('#closeConsole').click(close);
 
         var currentStack= [];
         var finishedStack = [];
 
         $axure.messageCenter.addMessageListener(function (message, data) {
-            if(message == 'globalVariableValues') {
-                //If variables container isn't visible, then ignore
-                //if(!$('#variablesContainer').is(":visible")) {
-                //    return;
-                //}
+            if(message == 'axCompositeEventMessage') {
+                for(var i = 0; i < data.length; i++) {
+                    processMessages(data[i].message, data[i].data);
+                }
+            } else processMessages(message, data);
+        });
 
+        var processMessages = function(message, data) {
+            if(message == 'globalVariableValues') {
                 $('#variablesDiv').empty();
                 for(var key in data) {
                     var value = data[key] == '' ? '(blank)' : data[key];
-                    $('#variablesDiv').append('<div class="variableDiv"><span class="variableName">' + key + '</span><br/>' + value + '</div>');
+                    $('#variablesDiv').append('<div class="variableList"><div class="variableName">' + key + '</div><div class="variableValue">' + value + '</div></div>');
                 }
-            } if(message == 'setGlobalVar') {
-                //$('#variablesContainer').html("");
-                //for (var variable in $axure.globalVariableProvider.getDefinedVariables) {
-                //    $('#variablesContainer').append("<div class='varName'>" + variable + "</div>");
-                //    $('#variablesContainer').append("<div class='varVal'>" + $axure.globalVariableProvider.getVariableValue(variable) + "</div>");
-                //}
             } else if(message == 'axEvent') {
                 var addToStack = "<div class='axEventBlock'>";
-                addToStack += "<div class='axTime'>" + new Date().toLocaleTimeString() + "</div>";
-                addToStack += "<div class='axLabel'>" + data.label + " (" + data.type + ")</div>";
-                addToStack += "<div class='axEvent'>" + data.event.description + "</div>";
+                addToStack += "<div class='axEventContainer'>";
+                addToStack += "    <div class='axTime'>" + new Date().toLocaleTimeString() + "</div>";
+                addToStack += "    <div class='axEvent'>" + data.event.description + ": </div>";
+                addToStack += "    <div class='axLabel'>" + data.label + " (" + data.type + ")</div>";
+                addToStack += "</div>";
+
                 currentStack.push(addToStack);
             } else if (message == 'axEventComplete') {
                 currentStack[currentStack.length - 1] += "</div>";
                 finishedStack.push(currentStack.pop());
                 if(currentStack.length == 0) {
-                    $('#traceClearLinkContainer').show();
                     $('#traceEmptyState').hide();
+                    $('#traceClear').show();
+                    $('#traceToggle').show();
 
-                    $('.lastAxEvent').removeClass('lastAxEvent');
                     for(var i = finishedStack.length - 1; i >= 0; i--) {
                         if($('#traceDiv').children().length > 99) $('#traceDiv').children().last().remove();
                         $('#traceDiv').prepend(finishedStack[i]);
-                        if(i == finishedStack.length - 1) $('#traceDiv').children().first().addClass('lastAxEvent');
                     }
                     finishedStack = [];
                 }
             } else if (message == 'axCase') {
-                currentStack[currentStack.length - 1] += "<div class='axCase'>" + data.description + "</div>";
+                //var addToStack = "<div class='axCaseContainer' style='background-color: #" + data.color + "'>";
+                var addToStack = "<div class='axCaseContainer'>";
+                addToStack += "    <div class='axCaseItem'>" + data.item + "</div>";
+                if (data.description) { addToStack += "    <div class='axCaseDescription' title='" + data.description + "'>" + data.description + "</div>" };
+                addToStack += "</div>";
+
+                currentStack[currentStack.length - 1] += addToStack;
             } else if (message == 'axAction') {
-                currentStack[currentStack.length - 1] += "<div class='axAction'>" + data.description + "</div>";
+                var addToStack = "<div class='axActionContainer'>";
+                addToStack += "    <div class='axActionItem'>" + data.name + "</div>";
+                //addToStack += "    <div class='axActionItem'>" + data.item + "</div>";
+                //if (data.description) { addToStack += "    <div class='axActionDescription' title='" + data.description + "'>" + data.description + "</div>" };
+                addToStack += "</div>";
+
+                currentStack[currentStack.length - 1] += addToStack;
+            } else if (message == 'axInfo') {
+                var addToStack = "<div class='axInfoContainer'>";
+                addToStack += "    <div class='axInfoItem'>" + data.item + "</div>";
+                if (data.description) { addToStack += "    <div class='axInfoDescription' title='" + data.longDescription + "'>" + data.description + "</div>" };
+                addToStack += "</div>";
+
+                currentStack[currentStack.length - 1] += addToStack;
             }
-        });
+        }
 
         // bind to the page load
         $axure.page.bind('load.debug', function () {
-
+            var traceStr = $axure.player.getHashStringVar(TRACE_VAR_NAME);
+            if (traceStr.length > 0) $axure.messageCenter.setState("isTracing", true);
+            else $axure.messageCenter.setState("isTracing", false);
             $axure.messageCenter.postMessage('getGlobalVariables', '');
 
             return false;
@@ -92,51 +103,68 @@
             $axure.messageCenter.postMessage('resetGlobalVariables', '');
         }
 
+        function close() {
+            $axure.player.pluginClose("debugHost");
+        }
+
         function cleartrace_click(event) {
             $('#traceDiv').html('');
-            $('#traceClearLinkContainer').hide();
-            $('#traceEmptyState').show();
+        }
+
+        function starttrace_click(event) {
+            $axure.messageCenter.setState("isTracing", true);
+            //$('#traceDiv').html('');
+            $('#traceEmptyState').hide();
+            $('#traceClear').show();
+            $('#traceToggle').text('Stop Trace');
+            $('#traceToggle').off("click");
+            $('#traceToggle').click(stoptrace_click);
+            $('#traceToggle').show();
+            console.log("starting trace");
+            $axure.player.setVarInCurrentUrlHash(TRACE_VAR_NAME, 1);
+        }
+
+        function stoptrace_click(event) {
+            $axure.messageCenter.setState("isTracing", false);
+            $('#traceDiv').prepend('<div class="tracePausedNotification">Trace Paused<div>');
+            $('#traceToggle').text('Restart Trace');
+            $('#traceToggle').off("click");
+            $('#traceToggle').click(starttrace_click);
+            console.log("stopping trace");
+            $axure.player.deleteVarFromCurrentUrlHash(TRACE_VAR_NAME);
         }
     });
 
-    function updateContainerHeight() {
-        $('#debugScrollContainer').height($('#debugHost').height() - $('#debugHeader').outerHeight());
-    }
-
     function generateDebug() {
-        var pageNotesUi = "<div id='debugHeader'' class='sitemapHeader'>";
+        var pageNotesUi = "<div id='debugHeader'>";
+        pageNotesUi += "<div id='debugToolbar'>";
+        pageNotesUi += "<div id='consoleTitle' class='pluginNameHeader'>Console</div>";
 
-        pageNotesUi += "<div id='debugToolbar' class='sitemapToolbar'>";
-        pageNotesUi += "<div class='pluginNameHeader'>CONSOLE</div>";
-        pageNotesUi += "<div class='pageNameHeader'></div>";
-
-        //pageNotesUi += "<div class='pageButtonHeader'>";
-
-        //pageNotesUi += "<a id='previousPageButton' title='Previous Page' class='sitemapToolbarButton'></a>";
-        //pageNotesUi += "<a id='nextPageButton' title='Next Page' class='sitemapToolbarButton'></a>";
-        //pageNotesUi += "<a id='variablesClearLink' title='Reset Variables' class='sitemapToolbarButton'></a>";
-
-        //pageNotesUi += "</div>";
         pageNotesUi += "</div>";
         pageNotesUi += "</div>";
 
-        //var pageNotesUi = "<div id='debugToolbar'><a id='debugVariablesLink' class='debugToolbarButton'>Variables</a> | <a id='debugTraceLink' class='debugToolbarButton'>Trace</a></div>";
+        pageNotesUi += "<div id='variablesContainer' style='max-height:300px; overflow-y:auto'>";
+        pageNotesUi += "<div id='variablesTitle' class='sectionTitle'>Variables</div>";
+        pageNotesUi += "<a id='variablesClearLink' class='traceOption'>Reset Variables</a>";
+        pageNotesUi += "<div id='variablesDiv'></div></div>";
+        pageNotesUi += "<div id='traceContainer'>";
+
+        pageNotesUi += "<div id='traceHeader'>";
+        pageNotesUi += "<span class='sectionTitle'>Trace</span><a id='traceClear' class='traceOption'>Clear Trace</a><a id='traceToggle' class='traceOption'>Stop Trace</a>";
+        pageNotesUi += "</div>";
+        pageNotesUi += "</div>";
         pageNotesUi += "<div id='debugScrollContainer'>";
         pageNotesUi += "<div id='debugContainer'>";
-        pageNotesUi += "<div id='variablesContainer'>";
-        pageNotesUi += "<div id='variablesClearLinkContainer' class='debugLinksContainer'><a id='variablesClearLink' title='Reset Variables'>Reset Variables</a></div>";
-        pageNotesUi += "<div id='variablesDiv'></div></div>";
-        pageNotesUi += "<div class='dottedDivider'></div>";
-        pageNotesUi += "<div id='traceContainer'>";
-        pageNotesUi += "<div id='traceClearLinkContainer' class='debugLinksContainer'><a id='traceClearLink' title='Clear Trace'>Clear Trace</a></div>";
-        pageNotesUi += "<div id='traceEmptyState' class='emptyStateContainer'><div class='emptyStateTitle'>No interactions in the trace.</div><div class='emptyStateContent'>Triggered interactions will appear here.</div><div class='dottedDivider'></div></div>";
+
+
+        pageNotesUi += "<div id='traceEmptyState'>";
+        pageNotesUi += "<div class='startInstructions'>Click the button below to start recording interactions as you click through the prototype.</div>";
+        pageNotesUi += "<div id='traceStart' class='startButton'>Start Trace</div>";
+        pageNotesUi += "</div>";
         pageNotesUi += "<div id='traceDiv'></div></div>";
         pageNotesUi += "</div></div>";
 
         $('#debugHost').html(pageNotesUi);
-        updateContainerHeight();
-
-        $('#traceClearLinkContainer').hide();
         $('#traceEmptyState').show();
     }
 

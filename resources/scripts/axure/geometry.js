@@ -42,10 +42,10 @@ $axure.internal(function($ax) {
 
 
     var _genRect = function(info, roundHalfPixel) {
-        var x = info.pagex;
-        var y = info.pagey;
-        var w = info.width;
-        var h = info.height;
+        var x = info.pagex();
+        var y = info.pagey();
+        var w = info.width();
+        var h = info.height();
 
         if(roundHalfPixel) {
             if(x % 1 != 0) {
@@ -90,13 +90,6 @@ $axure.internal(function($ax) {
         for(var i = 0; i < regionList.length; i++) {
             var region = regionMap[regionList[i]];
             var points = region.points;
-            if(!region.checked) {
-                if(!_checkInside(points, $ax.mouseLocation)) {
-                    region.callback({ outside: true });
-                    continue;
-                }
-                region.checked = true;
-            }
             for(var j = 0; j < points.length; j++) {
                 var startSegment = points[j];
                 var endSegment = points[(j + 1) % points.length];

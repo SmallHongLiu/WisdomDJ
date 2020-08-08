@@ -5,16 +5,6 @@ $axure.internal(function($ax) {
     var _legacy = {};
     $ax.legacy = _legacy;
 
-
-    // ************************** GLOBAL VARS *********************************//
-
-    // ************************************************************************//
-    //Check if IE
-    //var bIE = false;
-    //if ((index = navigator.userAgent.indexOf("MSIE")) >= 0) {
-    //    bIE = true;
-    //}
-
     var Forms = window.document.getElementsByTagName("FORM");
     for(var i = 0; i < Forms.length; i++) {
         var Form = Forms[i];
@@ -31,39 +21,7 @@ $axure.internal(function($ax) {
             }
         }
     };
-
-    //    function InsertAfterBegin(dom, html) {
-    //        if(!IE) {
-    //            var phtml;
-    //            var range = dom.ownerDocument.createRange();
-    //            range.selectNodeContents(dom);
-    //            range.collapse(true);
-    //            phtml = range.createContextualFragment(html);
-    //            dom.insertBefore(phtml, dom.firstChild);
-    //        } else {
-    //            dom.insertAdjacentHTML("afterBegin", html);
-    //        }
-    //    }
-
-    //    function InsertBeforeEnd(dom, html) {
-    //        if(!IE) {
-    //            var phtml;
-    //            var range = dom.ownerDocument.createRange();
-    //            range.selectNodeContents(dom);
-    //            range.collapse(dom);
-    //            phtml = range.createContextualFragment(html);
-    //            dom.appendChild(phtml);
-    //        } else {
-    //            dom.insertAdjacentHTML("beforeEnd", html);
-    //        }
-    //    }
-
-    //Get the id of the Workflow Dialog belonging to element with id = id
-
-    //    function Workflow(id) {
-    //        return id + 'WF';
-    //    }
-
+    
     $ax.legacy.BringToFront = function(id, skipFixed) {
         _bringToFrontHelper(id);
         if(!skipFixed) $ax.legacy.BringFixedToFront();
@@ -193,7 +151,7 @@ $axure.internal(function($ax) {
             var diagramObject = elementId && $ax.getObjectFromElementId(elementId);
             if (diagramObject && $ax.public.fn.IsDynamicPanel(diagramObject.type) && diagramObject.scrollbars != 'none') {
                 //returns the panel diagram div which handles scrolling
-                return window.document.getElementById(last.attr('id'));
+                return $ax.dynamicPanelManager.getShownState(current.attr('id'))[0];
             }
             last = current;
             current = current.parent();
